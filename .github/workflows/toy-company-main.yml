@@ -1,4 +1,4 @@
-name: deploy-toy-website-end-to-end
+name: Toy Company - Main
 concurrency: toy-company
 
 on:

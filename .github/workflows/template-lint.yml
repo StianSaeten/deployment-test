@@ -1,4 +1,4 @@
-name: lint
+name: Template - Lint
 
 on:
   workflow_call:

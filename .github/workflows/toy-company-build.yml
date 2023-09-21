@@ -1,4 +1,4 @@
-name: build-website
+name: Toy Company - Build
 
 on:
   workflow_call:

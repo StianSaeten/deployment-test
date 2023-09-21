@@ -15,7 +15,7 @@ jobs:
 
   # Build the application and database.
   build:
-    uses: ./toy-company/deploy/build.yml
+    uses: ./.github/actions/templates/build.yml
 
   # Lint the Bicep file.
   lint:
@@ -25,7 +25,7 @@ jobs:
 
   # Deploy to the test environment.
   deploy-test:
-    uses: ./toy-company/deploy/deploy.yml 
+    uses: ./.github/actions/templates/deploy.yml 
     needs: [build, lint]
     with:
       environmentType: Test
@@ -41,7 +41,7 @@ jobs:
 
   # Deploy to the production environment.
   deploy-production:
-    uses: ./toy-company/deploy/deploy.yml
+    uses: ./.github/actions/templates/deploy.yml
     needs:
       - lint
       - build

@@ -16,5 +16,4 @@ jobs:
 
     - name: Lint code
       run: |
-        Set-Location ${{ inputs.workingFolder }}
         az bicep build --file deploy/main.bicep

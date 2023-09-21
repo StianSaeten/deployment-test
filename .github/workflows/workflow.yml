@@ -15,17 +15,17 @@ jobs:
 
   # Build the application and database.
   build:
-    uses: ./.github/actions/templates/build
+    uses: ./.github/workflows/templates/build.yml
 
   # Lint the Bicep file.
   lint:
-    uses: ./.github/actions/templates/lint
+    uses: ./.github/workflows/templates/lint.yml
     with:
       workingFolder: ./toy-company/
 
   # Deploy to the test environment.
   deploy-test:
-    uses: ./.github/actions/templates/deploy
+    uses: ./.github/workflows/templates/deploy.yml
     needs: [build, lint]
     with:
       environmentType: Test
@@ -41,7 +41,7 @@ jobs:
 
   # Deploy to the production environment.
   deploy-production:
-    uses: ./.github/actions/templates/deploy
+    uses: ./.github/workflows/templates/deploy.yml
     needs:
       - lint
       - build

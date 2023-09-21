@@ -1,4 +1,4 @@
-name: Toy Company - Build
+name: Toy Company - Main - Build
 
 on:
   workflow_call:

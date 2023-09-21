@@ -1,4 +1,4 @@
-name: Toy Company - Deploy
+name: Toy Company - Main - Deploy
 
 on:
   workflow_call:

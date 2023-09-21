@@ -1,0 +1,19 @@
+name: Template - Lint
+
+on:
+  workflow_call:
+    inputs:
+      workingFolder:
+        required: true
+        type: string
+
+jobs:
+  lint:
+    name: Lint code
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Lint code
+      run: |
+        az bicep build --file deploy/main.bicep

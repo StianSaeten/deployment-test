@@ -2,9 +2,9 @@ name: deploy-toy-website-end-to-end
 concurrency: toy-company
 
 on:
-  push:
-    branches:
-      - main
+  # push:
+    # branches:
+    #   - main
   workflow_dispatch:
 
 permissions:
@@ -15,15 +15,17 @@ jobs:
 
   # Build the application and database.
   build:
-    uses: ./.github/workflows/build.yml
+    uses: ./toy-company/deploy/build.yml
 
   # Lint the Bicep file.
   lint:
-    uses: ./.github/workflows/lint.yml
+    uses: ./.github/actions/templates/lint.yml
+    with:
+      workingFolder: ./toy-company/
 
   # Deploy to the test environment.
   deploy-test:
-    uses: ./.github/workflows/deploy.yml
+    uses: ./toy-company/deploy/deploy.yml 
     needs: [build, lint]
     with:
       environmentType: Test
@@ -39,7 +41,7 @@ jobs:
 
   # Deploy to the production environment.
   deploy-production:
-    uses: ./.github/workflows/deploy.yml
+    uses: ./toy-company/deploy/deploy.yml
     needs:
       - lint
       - build

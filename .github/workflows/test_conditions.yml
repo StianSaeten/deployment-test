@@ -1,0 +1,19 @@
+name: sub-qwatt-env-001
+concurrency: sub-qwatt-env-001
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Specify the tag of the deployment.'
+        required: false
+        type: string
+
+
+jobs:
+  validate-bicep-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        if: contains(fromJSON('["sub/", "rg/"]'), github.event.inputs.tag)

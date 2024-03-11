@@ -21,4 +21,4 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        if: github.event.inputs.environment == 'prod' && github.ref == 'refs/heads/main' && (contains(github.event.inputs.tag, 'sub/') || contains(github.event.inputs.tag, 'rg/')
+        if: github.event.inputs.environment == 'prod' && github.ref == 'refs/heads/main' && (contains(github.event.inputs.tag, 'sub/') || contains(github.event.inputs.tag, 'rg/'))

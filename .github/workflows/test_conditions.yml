@@ -16,4 +16,4 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        if: contains(fromJSON('["sub/", "rg/"]'), github.event.inputs.tag)
+       # if: contains(fromJSON('["sub/", "rg/"]'), github.event.inputs.tag)

@@ -8,6 +8,13 @@ on:
         description: 'Specify the tag of the deployment.'
         required: false
         type: string
+      environment:
+        options:
+            - dev
+            - test
+            - stage
+            - prod
+        type: choice
 
 
 jobs:
@@ -16,4 +23,4 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        if: github.event.inputs.tag == 'sub/' || github.event.inputs.tag == 'rg/'
+        if: github.ref == 'refs/heads/main' && (github.event.inputs.tag == 'sub/' || github.event.inputs.tag == 'rg/')

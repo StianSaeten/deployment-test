@@ -16,4 +16,4 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        if: contains('sub/', github.event.inputs.tag)
+        if: github.event.inputs.tag == 'sub/' || github.event.inputs.tag == 'rg/'

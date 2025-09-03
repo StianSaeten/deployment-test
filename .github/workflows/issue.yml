@@ -1,0 +1,197 @@
+name: Create ACA Workload PR
+
+on:
+  repository_dispatch:
+    types: [create-aca-workload]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prepare values
+        id: prep
+        run: |
+          echo "serviceName=test" >> $GITHUB_OUTPUT
+          echo "branch=testbranch"           >> $GITHUB_OUTPUT
+          echo "filepath=.\"       >> $GITHUB_OUTPUT
+          echo "filename=test.json"       >> $GITHUB_OUTPUT
+          echo "environment=test" >> $GITHUB_OUTPUT
+          echo "instance=001"       >> $GITHUB_OUTPUT
+          echo "locationCode=we"   >> $GITHUB_OUTPUT
+
+      - name: Create branch if missing
+        env:
+          BRANCH: ${{ steps.prep.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "Branch exists."
+          else
+            git switch --create "$BRANCH"
+            git push origin "$BRANCH"
+          fi
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          git config --global user.email "mr.robot0166@montel.energy"
+          git config --global user.name  "mr.robot0166[bot]"
+
+      - name: Write JSON file
+        env:
+          BRANCH:   ${{ steps.prep.outputs.branch }}
+          FILEPATH: ${{ steps.prep.outputs.filepath }}
+          FILENAME: ${{ steps.prep.outputs.filename }}
+        run: |
+          git fetch origin "$BRANCH"
+          git switch "$BRANCH"
+          mkdir -p "$FILEPATH"
+
+          # Create the file with custom content
+          echo "test file" > "${FILEPATH}/${FILENAME}"
+
+          git add "${FILEPATH}/${FILENAME}"
+          if ! git diff --cached --quiet; then
+            git commit -m "Add ${FILENAME}"
+            git push origin "$BRANCH"
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Create or reuse Issue
+        id: issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const serviceName = `${{ steps.prep.outputs.serviceName }}`;
+            const env = `${{ steps.prep.outputs.environment }}`;
+            const loc = `${{ steps.prep.outputs.locationCode }}`;
+            const inst = `${{ steps.prep.outputs.instance }}`;
+            const path = `${{ steps.prep.outputs.filepath }}/${{ steps.prep.outputs.filename }}`;
+
+            const fs = require('fs');
+            const json = fs.readFileSync('payload.json', 'utf8');
+
+            const title = `[ACA Workload]: ${serviceName} (rg-${serviceName}-${env}-${loc}-${inst})`;
+            const body = [
+              `Generate ACA workload resources for **${serviceName}** in \`rg-${serviceName}-${env}-${loc}-${inst}\`.`,
+              ``,
+              `File to be added/updated: \`${path}\``,
+              ``,
+              `Payload:`,
+              '```json',
+              json,
+              '```'
+            ].join('\n');
+
+            // Try to find an open issue with the same title to avoid duplicates
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            let existing = issues.find(i => i.title === title && !i.pull_request);
+            if (existing) {
+              core.info(`Reusing existing issue #${existing.number}`);
+              core.setOutput('number', existing.number.toString());
+              core.setOutput('url', existing.html_url);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body
+              });
+              core.info(`Issue created: #${created.number}`);
+              core.setOutput('number', created.number.toString());
+              core.setOutput('url', created.html_url);
+            }
+
+      - name: Open PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = "${{ steps.prep.outputs.branch }}";
+            const title  = `ACA Workload - ${{ steps.prep.outputs.serviceName }}`;
+            const path   = `${{ steps.prep.outputs.filepath }}/${{ steps.prep.outputs.filename }}`;
+            const issueNumber = Number("${{ steps.issue.outputs.number }}");
+
+            const fs = require('fs');
+            const json = fs.readFileSync('payload.json', 'utf8');
+
+            // Include "Closes #<issue>" to auto-link & auto-close on merge
+            const body =
+              `Related issue: #${issueNumber}\n\n` +
+              `Closes #${issueNumber}\n\n` +
+              `File: ${path}\n\n` +
+              "```json\n" + json + "\n```";
+
+            try {
+              const { data: pr } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                title,
+                head:  branch,
+                base:  "main",
+                body
+              });
+              core.info(`PR created: #${pr.number}`);
+
+              // Optional: add a comment to the Issue with the PR link
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  issue_number: issueNumber,
+                  body: `Linked PR: #${pr.number}`
+                });
+              } catch (e) {
+                core.warning(`Couldn't comment on issue #${issueNumber}: ${e.message}`);
+              }
+            } catch (e) {
+              // If PR already exists, ignore; otherwise, rethrow
+              if (
+                e.status === 422 &&
+                (
+                  (e.response && e.response.data && typeof e.response.data.message === "string" && e.response.data.message.includes("A pull request already exists")) ||
+                  (typeof e.message === "string" && e.message.includes("A pull request already exists"))
+                )
+              ) {
+                core.info("PR already exists.");
+
+                // Even if PR exists, still add a cross-link comment on the issue if we can
+                try {
+                  // Find the existing PR for this branch
+                  const { data: prs } = await github.rest.pulls.list({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    head: `${context.repo.owner}:${branch}`,
+                    state: 'open'
+                  });
+                  if (prs.length > 0) {
+                    const pr = prs[0];
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo:  context.repo.repo,
+                      issue_number: issueNumber,
+                      body: `Linked PR: #${pr.number}`
+                    });
+                  }
+                } catch (inner) {
+                  core.warning(`Couldn't backfill issue link: ${inner.message}`);
+                }
+              } else {
+                throw e;
+              }
+            }

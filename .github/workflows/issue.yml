@@ -116,18 +116,17 @@ jobs:
       - name: Open PR
         uses: actions/github-script@v7
         with:
-          script: |
+          script:  |
             const branch = "${{ steps.prep.outputs.branch }}";
             const title  = `ACA Workload - ${{ steps.prep.outputs.serviceName }}`;
             const path   = `${{ steps.prep.outputs.filepath }}/${{ steps.prep.outputs.filename }}`;
-            const issueNumber = Number("${{ steps.issue.outputs.number }}");
 
+            // Build body with code-fenced JSON
             const fs = require('fs');
-
-            // Include "Closes #<issue>" to auto-link & auto-close on merge
+            const json = fs.readFileSync('payload.json', 'utf8');
             const body =
-              `Related issue: #${issueNumber}\n\n` +
-              `Closes #${issueNumber}\n\n`;
+              `File: ${path}\n\n` +
+              "```\n" + json + "\n```";
 
             try {
               const { data: pr } = await github.rest.pulls.create({
@@ -139,18 +138,6 @@ jobs:
                 body
               });
               core.info(`PR created: #${pr.number}`);
-
-              // Optional: add a comment to the Issue with the PR link
-              try {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo:  context.repo.repo,
-                  issue_number: issueNumber,
-                  body: `Linked PR: #${pr.number}`
-                });
-              } catch (e) {
-                core.warning(`Couldn't comment on issue #${issueNumber}: ${e.message}`);
-              }
             } catch (e) {
               // If PR already exists, ignore; otherwise, rethrow
               if (
@@ -161,29 +148,9 @@ jobs:
                 )
               ) {
                 core.info("PR already exists.");
-
-                // Even if PR exists, still add a cross-link comment on the issue if we can
-                try {
-                  // Find the existing PR for this branch
-                  const { data: prs } = await github.rest.pulls.list({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    head: `${context.repo.owner}:${branch}`,
-                    state: 'open'
-                  });
-                  if (prs.length > 0) {
-                    const pr = prs[0];
-                    await github.rest.issues.createComment({
-                      owner: context.repo.owner,
-                      repo:  context.repo.repo,
-                      issue_number: issueNumber,
-                      body: `Linked PR: #${pr.number}`
-                    });
-                  }
-                } catch (inner) {
-                  core.warning(`Couldn't backfill issue link: ${inner.message}`);
-                }
               } else {
                 throw e;
+              }
+            }
               }
             }

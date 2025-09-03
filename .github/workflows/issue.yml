@@ -1,8 +1,8 @@
 name: Create ACA Workload PR
 
+# Changed to manual trigger
 on:
-  repository_dispatch:
-    types: [create-aca-workload]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,13 +21,13 @@ jobs:
       - name: Prepare values
         id: prep
         run: |
-          echo "serviceName=test" >> $GITHUB_OUTPUT
-          echo "branch=testbranch"           >> $GITHUB_OUTPUT
-          echo "filepath=.\"       >> $GITHUB_OUTPUT
-          echo "filename=test.json"       >> $GITHUB_OUTPUT
-          echo "environment=test" >> $GITHUB_OUTPUT
-          echo "instance=001"       >> $GITHUB_OUTPUT
-          echo "locationCode=we"   >> $GITHUB_OUTPUT
+          echo "serviceName=test"           >> $GITHUB_OUTPUT
+          echo "branch=testbranch"          >> $GITHUB_OUTPUT
+          echo "filepath=."                 >> $GITHUB_OUTPUT
+          echo "filename=test.json"         >> $GITHUB_OUTPUT
+          echo "environment=test"           >> $GITHUB_OUTPUT
+          echo "instance=001"               >> $GITHUB_OUTPUT
+          echo "locationCode=we"            >> $GITHUB_OUTPUT
 
       - name: Create branch if missing
         env:

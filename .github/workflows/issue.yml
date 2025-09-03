@@ -123,14 +123,11 @@ jobs:
             const issueNumber = Number("${{ steps.issue.outputs.number }}");
 
             const fs = require('fs');
-            const json = fs.readFileSync('payload.json', 'utf8');
 
             // Include "Closes #<issue>" to auto-link & auto-close on merge
             const body =
               `Related issue: #${issueNumber}\n\n` +
-              `Closes #${issueNumber}\n\n` +
-              `File: ${path}\n\n` +
-              "```json\n" + json + "\n```";
+              `Closes #${issueNumber}\n\n`;
 
             try {
               const { data: pr } = await github.rest.pulls.create({

@@ -123,7 +123,7 @@ jobs:
 
             // Build body with code-fenced JSON
             const fs = require('fs');
-            const json = fs.readFileSync('payload.json', 'utf8');
+            const json = fs.readFileSync(path, 'utf8');
             const body =
               `File: ${path}\n\n` +
               "```\n" + json + "\n```";
@@ -150,7 +150,5 @@ jobs:
                 core.info("PR already exists.");
               } else {
                 throw e;
-              }
-            }
               }
             }

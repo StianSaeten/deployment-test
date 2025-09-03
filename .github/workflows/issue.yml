@@ -79,18 +79,13 @@ jobs:
             const path = `${{ steps.prep.outputs.filepath }}/${{ steps.prep.outputs.filename }}`;
 
             const fs = require('fs');
-            const json = fs.readFileSync('payload.json', 'utf8');
 
             const title = `[ACA Workload]: ${serviceName} (rg-${serviceName}-${env}-${loc}-${inst})`;
             const body = [
               `Generate ACA workload resources for **${serviceName}** in \`rg-${serviceName}-${env}-${loc}-${inst}\`.`,
               ``,
               `File to be added/updated: \`${path}\``,
-              ``,
-              `Payload:`,
-              '```json',
-              json,
-              '```'
+              ``
             ].join('\n');
 
             // Try to find an open issue with the same title to avoid duplicates

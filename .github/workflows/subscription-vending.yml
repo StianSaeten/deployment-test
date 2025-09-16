@@ -94,7 +94,7 @@ jobs:
           $issueTitle = "[Subscripition Vending] $subName"
           
           # Disclaimer (no here-string)
-          $disclaimer = @(
+          $disclaimerSandbox = @(
           "⚠️ **Sandbox Usage Disclaimer**"
           "- The requestor will be set as **Owner** and are **100% responsible** for any cost generated."
           "- 🧪 Sandbox environments **must not** talk to internal services. Any such requests will be declined."
@@ -117,7 +117,9 @@ jobs:
           
           $payload    | ConvertTo-Json -Depth 20 | Set-Content payload.json -Encoding UTF8
           if ($subName -like '*-sbx-*')  {
-            $disclaimer | Set-Content disclaimer.md -Encoding UTF8
+            $disclaimerSandbox | Set-Content disclaimer.md -Encoding UTF8
+          } else {
+            '' | Set-Content disclaimer.md -Encoding UTF8
           }
 
       - name: Create issue

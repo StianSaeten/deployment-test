@@ -56,23 +56,26 @@ jobs:
         id: validate
         shell: pwsh
         run: |
-          # Accept JSON from workflow_dispatch input OR repository_dispatch client_payload
-          $raw = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            @"
+          # Decide source of JSON depending on event type
+          $raw = $null
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $raw = @"
             ${{ github.event.inputs.payload_json }}
             "@
                       } else {
-                        @"
+                        $raw = @"
             ${{ toJson(github.event.client_payload) }}
             "@
           }
 
-          if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error "No input payload provided." }
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Error "No input payload provided."
+          }
 
           try {
             $payload = $raw | ConvertFrom-Json -ErrorAction Stop
           } catch {
-            Write-Error "Invalid JSON. $_"
+            Write-Error "Invalid JSON in payload. $_"
           }
 
           # Validate fields

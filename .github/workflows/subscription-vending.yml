@@ -1,0 +1,269 @@
+name: Subscription Vending (Webhook)
+
+on:
+  repository_dispatch:
+    types: [subscription_vending_request]
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  MANAGEMENT_GROUP_ID: parent-mg-id                         # <-- set your MG ID (or pass in payload)
+  TEMPLATE_FILE: deployments/self-service/subscriptions/deploy.bicep
+  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}       # <-- set in repo/org secrets (JSON for azure/login)
+  LOCATION: westeurope
+
+jobs:
+  vend:
+    name: Vend Subscription
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure PowerShell Az modules
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          $modules = @('Az.Accounts','Az.Resources')
+          foreach ($m in $modules) {
+            if (-not (Get-Module -ListAvailable -Name $m)) {
+              Install-Module $m -Scope CurrentUser -Force -AllowClobber
+            }
+          }
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ env.AZURE_CREDENTIALS }}
+          allow-no-subscriptions: true
+
+      - name: Parse & validate input payload
+        id: validate
+        shell: pwsh
+        run: |
+          # The webhook should send client_payload.json with needed fields.
+          # Example minimal payload structure is shown below.
+          $payload = @"
+          ${{ toJson(github.event.client_payload) }}
+          "@ | ConvertFrom-Json
+
+          if (-not $payload) {
+            Write-Error "No client_payload provided in repository_dispatch."
+          }
+
+          # Expected payload fields:
+          # {
+          #   "subscriptionName": { "serviceName": "...", "environment": "sbx|dev|test|stage|prod", "instance": "001-010" },
+          #   "requestedBy": "firstname.lastname@montel.energy",
+          #   "managementGroupId": "parent-mg-id"  # optional; defaults to env
+          # }
+          $errors = @()
+
+          if (-not $payload.subscriptionName) { $errors += "subscriptionName missing" }
+          else {
+            if (-not $payload.subscriptionName.serviceName) { $errors += "subscriptionName.serviceName missing" }
+            if (-not $payload.subscriptionName.environment) { $errors += "subscriptionName.environment missing" }
+            if (-not $payload.subscriptionName.instance) { $errors += "subscriptionName.instance missing" }
+            # basic checks
+            $envOk = @('sbx','dev','test','stage','prod') -contains $payload.subscriptionName.environment
+            if (-not $envOk) { $errors += "subscriptionName.environment must be one of sbx|dev|test|stage|prod" }
+            if ($payload.subscriptionName.instance -notmatch '^(00[1-9]|0[1-9]\d|10)$') {
+              # allow 001-010 (strict)
+              if ($payload.subscriptionName.instance -notmatch '^00[1-9]|0(0[1-9]|10)|10$') { $null = $errors += "subscriptionName.instance must be 001-010" }
+            }
+            if ($payload.subscriptionName.serviceName -match '[^a-zA-Z0-9]') {
+              Write-Host "Note: serviceName should not contain dashes or special chars; module will strip them."
+            }
+          }
+
+          if (-not $payload.requestedBy) { $errors += "requestedBy missing" }
+          elseif ($payload.requestedBy -notmatch '^[^@]+@[^@]+\.[^@]+$') { $errors += "requestedBy must be an email" }
+
+          if ($errors.Count -gt 0) {
+            Write-Error ("Validation failed: " + ($errors -join '; '))
+          }
+
+          $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { "${{ env.MANAGEMENT_GROUP_ID }}" }
+
+          # Compose Title for the Issue
+          $subName = "$($payload.subscriptionName.serviceName)-$($payload.subscriptionName.environment)-$($payload.subscriptionName.instance)".ToLower()
+          $issueTitle = "[Subscripition Vending] $subName"
+
+          # build a disclaimer
+          $disclaimer = @"
+          ⚠️ **Sandbox Usage Disclaimer**
+          - You are set as **Owner** and are **100% responsible** for any cost generated.
+          - 🧪 Sandbox environments **must not** talk to internal services. Any such requests will be declined.
+          - 🛠️ Cloud Platform is **not responsible** for anything in sandbox.
+          - 🧹 When you no longer need the subscription, please **delete it** or contact **Cloud Platform**.
+          "@
+
+          # transform requestedBy to tag label: firstname.lastname@montel.energy -> firstname-lastname_f8u
+          function Get-RequestedByTag([string]$email) {
+            $local = $email.Split('@')[0]
+            $tag = ($local -replace '\.','-') + '_f8u'
+            return $tag
+          }
+          $tagLabel = Get-RequestedByTag $payload.requestedBy
+
+          # export step outputs
+          echo "issue_title=$issueTitle" >> $env:GITHUB_OUTPUT
+          echo "mg_id=$mgId" >> $env:GITHUB_OUTPUT
+          echo "requested_by=$($payload.requestedBy)" >> $env:GITHUB_OUTPUT
+          echo "requested_by_tag=$tagLabel" >> $env:GITHUB_OUTPUT
+          echo "subscription_compose_name=$subName" >> $env:GITHUB_OUTPUT
+          # stash full payload for later steps
+          $payload | ConvertTo-Json -Depth 10 | Out-File -FilePath payload.json -Encoding UTF8
+          $disclaimer | Out-File -FilePath disclaimer.md -Encoding UTF8
+
+      - name: Create issue
+        id: create_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const payload = JSON.parse(fs.readFileSync('payload.json','utf8'));
+            const disclaimer = fs.readFileSync('disclaimer.md','utf8');
+
+            const subscriptionName = `${payload.subscriptionName.serviceName}-${payload.subscriptionName.environment}-${payload.subscriptionName.instance}`.toLowerCase();
+
+            const body = [
+              `## 🚀 Subscription Vending Request`,
+              ``,
+              `**Requested by:** ${payload.requestedBy}`,
+              `**Subscription name (composed):** \`${subscriptionName}\``,
+              ``,
+              `### 📦 Input`,
+              '```json',
+              JSON.stringify(payload, null, 2),
+              '```',
+              ``,
+              `### ℹ️ Notes`,
+              `- Deployment starting shortly…`,
+              ``,
+              `---`,
+              disclaimer
+            ].join('\n');
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: process.env.issue_title,
+              body,
+              labels: ['subscription-vending', process.env.requested_by_tag]
+            });
+            core.setOutput('number', issue.data.number);
+
+      - name: Run deployment
+        id: deploy
+        shell: pwsh
+        continue-on-error: false
+        run: |
+          $payload = Get-Content payload.json -Raw | ConvertFrom-Json
+          $mgId   = "${{ steps.validate.outputs.mg_id }}"
+          $loc    = "${{ env.LOCATION }}"
+
+          $templatePath = (Join-Path $PWD "${{ env.TEMPLATE_FILE }}")
+          if (-not (Test-Path $templatePath)) {
+            Write-Error "Template file not found at $templatePath"
+          }
+
+          $ts = Get-Date -Format 'yyyyMMddHHmmss'
+          $name = "sub-$ts"
+
+          $paramObject = @{
+            parSubscriptionName = @{
+              serviceName = $payload.subscriptionName.serviceName
+              environment = $payload.subscriptionName.environment
+              instance    = $payload.subscriptionName.instance
+            }
+            parentManagementGroupId = $mgId
+            parRequestedBy          = $payload.requestedBy
+          }
+          if ($payload.parBillingScope) { $paramObject.parBillingScope = $payload.parBillingScope }
+          if ($payload.parCreatedOn)   { $paramObject.parCreatedOn   = $payload.parCreatedOn }
+
+          Write-Host "Starting New-AzManagementGroupDeployment..."
+          $deployment = New-AzManagementGroupDeployment `
+              -Name $name `
+              -Location $loc `
+              -ManagementGroupId $mgId `
+              -TemplateFile $templatePath `
+              -TemplateParameterObject $paramObject `
+              -ErrorAction Stop
+              -WhatIf
+
+          # Try to read expected outputs (adjust names to match your bicep outputs)
+          # e.g., output outSubscriptionId string, outSubscriptionResourceId string, outSubscriptionName string
+          $out = @{}
+          foreach ($k in @('outSubscriptionId','outSubscriptionResourceId','outSubscriptionName')) {
+            if ($deployment.Outputs.$k) { $out[$k] = $deployment.Outputs.$k.value }
+          }
+
+          # Fallback attempts (if outputs are named differently)
+          if (-not $out.ContainsKey('outSubscriptionName')) {
+            $out['outSubscriptionName'] = "${{ steps.validate.outputs.subscription_compose_name }}"
+          }
+
+          # Export as step outputs
+          foreach ($key in $out.Keys) {
+            echo ("{0}={1}" -f $key, $out[$key]) >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Update issue with results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const num = Number('${{ steps.create_issue.outputs.number }}');
+            const ok  = '${{ job.status }}' === 'success';
+
+            const lines = [];
+            if (ok) {
+              lines.push('## ✅ Deployment Complete');
+              lines.push('');
+              if ('${{ steps.deploy.outputs.outSubscriptionId }}')   lines.push(`**Subscription ID:** \`${{ steps.deploy.outputs.outSubscriptionId }}\``);
+              if ('${{ steps.deploy.outputs.outSubscriptionResourceId }}') lines.push(`**Resource ID:** \`${{ steps.deploy.outputs.outSubscriptionResourceId }}\``);
+              if ('${{ steps.deploy.outputs.outSubscriptionName }}') lines.push(`**Subscription Name:** \`${{ steps.deploy.outputs.outSubscriptionName }}\``);
+              lines.push('');
+              lines.push('🎉 You can now use your subscription.');
+              lines.push('');
+              lines.push('_Tip: Keep costs low; delete unused resources early._');
+            } else {
+              lines.push('## ❌ Deployment Failed');
+              lines.push('');
+              lines.push('If you need help, contact **Cloud Platform**.');
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: num,
+              body: lines.join('\n')
+            });
+
+            // Add a status label
+            const addLabel = ok ? 'deployed' : 'failed';
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: num,
+              labels: [addLabel]
+            });
+
+      - name: Close issue if success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const num = Number('${{ steps.create_issue.outputs.number }}');
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: num,
+              state: 'closed'
+            });
+

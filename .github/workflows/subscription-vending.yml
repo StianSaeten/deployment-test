@@ -56,28 +56,36 @@ jobs:
         id: validate
         shell: pwsh
         run: |
-          # Decide source of JSON depending on event type
-          $raw = $null
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          # Accept JSON from workflow_dispatch input OR repository_dispatch client_payload
+          $eventName = $env:GITHUB_EVENT_NAME
+          if ($eventName -eq 'workflow_dispatch') {
+            # Expect the workflow to pass the raw JSON string via an env/input named PAYLOAD_JSON
+            if ([string]::IsNullOrWhiteSpace($env:PAYLOAD_JSON)) {
+              Write-Error "No input payload provided (PAYLOAD_JSON missing)."
+            }
             $raw = @"
-            ${{ github.event.inputs.payload_json }}
-            "@
-                      } else {
-                        $raw = @"
-            ${{ toJson(github.event.client_payload) }}
-            "@
+          $($env:PAYLOAD_JSON)
+          "@
+          } else {
+            if (-not (Test-Path $env:GITHUB_EVENT_PATH)) {
+              Write-Error "GITHUB_EVENT_PATH not found."
+            }
+            $eventJson = Get-Content -Raw $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+            if ($null -ne $eventJson.client_payload) {
+              $raw = ($eventJson.client_payload | ConvertTo-Json -Depth 50)
+            } else {
+              $raw = ($eventJson | ConvertTo-Json -Depth 50)
+            }
           }
-
-          if ([string]::IsNullOrWhiteSpace($raw)) {
-            Write-Error "No input payload provided."
-          }
-
+          
+          if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error "No input payload provided." }
+          
           try {
             $payload = $raw | ConvertFrom-Json -ErrorAction Stop
           } catch {
-            Write-Error "Invalid JSON in payload. $_"
+            Write-Error "Invalid JSON. $_"
           }
-
+          
           # Validate fields
           $errors = @()
           if (-not $payload.subscriptionName) { $errors += "subscriptionName missing" }
@@ -95,14 +103,14 @@ jobs:
           }
           if (-not $payload.requestedBy) { $errors += "requestedBy missing" }
           elseif ($payload.requestedBy -notmatch '^[^@]+@[^@]+\.[^@]+$') { $errors += "requestedBy must be an email" }
-
+          
           if ($errors.Count -gt 0) { Write-Error ("Validation failed: " + ($errors -join '; ')) }
-
+          
           # Defaults/derived
-          $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { "${{ env.MANAGEMENT_GROUP_ID }}" }
+          $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { $env:MANAGEMENT_GROUP_ID }
           $subName = "$($payload.subscriptionName.serviceName)-$($payload.subscriptionName.environment)-$($payload.subscriptionName.instance)".ToLower()
-          $issueTitle = "[Subscripition Vending] $subName"
-
+          $issueTitle = "[Subscription Vending] $subName"
+          
           $disclaimer = @"
           ⚠️ **Sandbox Usage Disclaimer**
           - You are set as **Owner** and are **100% responsible** for any cost generated.
@@ -110,20 +118,20 @@ jobs:
           - 🛠️ Cloud Platform is **not responsible** for anything in sandbox.
           - 🧹 When you no longer need the subscription, please **delete it** or contact **Cloud Platform**.
           "@
-
+          
           function Get-RequestedByTag([string]$email) {
             $local = $email.Split('@')[0]
             ($local -replace '\.','-') + '_f8u'
           }
           $tagLabel = Get-RequestedByTag $payload.requestedBy
-
+          
           # Outputs for later steps
           "issue_title=$issueTitle"                 | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "mg_id=$mgId"                             | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "requested_by=$($payload.requestedBy)"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "requested_by_tag=$tagLabel"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "subscription_compose_name=$subName"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
+          
           $payload    | ConvertTo-Json -Depth 20 | Set-Content payload.json -Encoding UTF8
           $disclaimer | Set-Content disclaimer.md -Encoding UTF8
 

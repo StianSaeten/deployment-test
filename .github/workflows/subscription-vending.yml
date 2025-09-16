@@ -120,42 +120,47 @@ jobs:
           $payload    | ConvertTo-Json -Depth 20 | Set-Content payload.json -Encoding UTF8
           $disclaimer | Set-Content disclaimer.md -Encoding UTF8
 
-      - name: Create issue
-        id: create_issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const payload = JSON.parse(fs.readFileSync('payload.json','utf8'));
-            const disclaimer = fs.readFileSync('disclaimer.md','utf8');
-            const subscriptionName = `${payload.subscriptionName.serviceName}-${payload.subscriptionName.environment}-${payload.subscriptionName.instance}`.toLowerCase();
-
-            const body = [
-              `## 🚀 Subscription Vending Request`,
-              ``,
-              `**Requested by:** ${payload.requestedBy}`,
-              `**Subscription name (composed):** \`${subscriptionName}\``,
-              ``,
-              `### 📦 Input`,
-              '```json',
-              JSON.stringify(payload, null, 2),
-              '```',
-              ``,
-              `### ℹ️ Notes`,
-              `- Deployment starting shortly…`,
-              ``,
-              `---`,
-              disclaimer
-            ].join('\n');
-
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: process.env.issue_title,
-              body,
-              labels: ['subscription-vending', process.env.requested_by_tag]
-            });
-            core.setOutput('number', issue.data.number);
+            - name: Create issue
+              id: create_issue
+              uses: actions/github-script@v7
+              env:
+                ISSUE_TITLE: ${{ steps.validate.outputs.issue_title }}
+                REQUESTED_BY_TAG: ${{ steps.validate.outputs.requested_by_tag }}
+              with:
+                script: |
+                  const fs = require('fs');
+                  const payload = JSON.parse(fs.readFileSync('payload.json','utf8'));
+                  const disclaimer = fs.readFileSync('disclaimer.md','utf8');
+                  const subscriptionName = `${payload.subscriptionName.serviceName}-${payload.subscriptionName.environment}-${payload.subscriptionName.instance}`.toLowerCase();
+      
+                  const body = [
+                    `## 🚀 Subscription Vending Request`,
+                    ``,
+                    `**Requested by:** ${payload.requestedBy}`,
+                    `**Subscription name (composed):** \`${subscriptionName}\``,
+                    ``,
+                    `### 📦 Input`,
+                    '```json',
+                    JSON.stringify(payload, null, 2),
+                    '```',
+                    ``,
+                    `### ℹ️ Notes`,
+                    `- Deployment starting shortly…`,
+                    ``,
+                    `---`,
+                    disclaimer
+                  ].join('\n');
+      
+                  const labels = ['subscription-vending', process.env.REQUESTED_BY_TAG].filter(Boolean);
+      
+                  const issue = await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title: process.env.ISSUE_TITLE,   // <-- now provided
+                    body,
+                    labels
+                  });
+                  core.setOutput('number', issue.data.number);
 
       - name: Update issue with results
         if: always()

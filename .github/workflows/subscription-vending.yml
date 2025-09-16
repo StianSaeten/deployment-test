@@ -57,25 +57,10 @@ jobs:
         shell: pwsh
         run: |
           # Accept JSON from workflow_dispatch input OR repository_dispatch client_payload
-          $eventName = $env:GITHUB_EVENT_NAME
-          if ($eventName -eq 'workflow_dispatch') {
-            # Expect the workflow to pass the raw JSON string via an env/input named PAYLOAD_JSON
-            if ([string]::IsNullOrWhiteSpace($env:PAYLOAD_JSON)) {
-              Write-Error "No input payload provided (PAYLOAD_JSON missing)."
-            }
-            $raw = @"
-          $($env:PAYLOAD_JSON)
-          "@
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $raw = '${{ github.event.inputs.payload_json }}'
           } else {
-            if (-not (Test-Path $env:GITHUB_EVENT_PATH)) {
-              Write-Error "GITHUB_EVENT_PATH not found."
-            }
-            $eventJson = Get-Content -Raw $env:GITHUB_EVENT_PATH | ConvertFrom-Json
-            if ($null -ne $eventJson.client_payload) {
-              $raw = ($eventJson.client_payload | ConvertTo-Json -Depth 50)
-            } else {
-              $raw = ($eventJson | ConvertTo-Json -Depth 50)
-            }
+            $raw = '${{ toJson(github.event.client_payload) }}'
           }
           
           if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error "No input payload provided." }
@@ -95,7 +80,6 @@ jobs:
             if (-not $payload.subscriptionName.instance)    { $errors += "subscriptionName.instance missing" }
             $envOk = @('sbx','dev','test','stage','prod') -contains $payload.subscriptionName.environment
             if (-not $envOk) { $errors += "subscriptionName.environment must be one of sbx|dev|test|stage|prod" }
-            # Only allow 001-010
             if ($payload.subscriptionName.instance -notmatch '^(00[1-9]|010)$') { $errors += "subscriptionName.instance must be 001-010" }
             if ($payload.subscriptionName.serviceName -match '[^a-zA-Z0-9]') {
               Write-Host "Note: serviceName should not contain dashes or special chars; module will strip them."
@@ -107,17 +91,18 @@ jobs:
           if ($errors.Count -gt 0) { Write-Error ("Validation failed: " + ($errors -join '; ')) }
           
           # Defaults/derived
-          $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { $env:MANAGEMENT_GROUP_ID }
+          $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { "${{ env.MANAGEMENT_GROUP_ID }}" }
           $subName = "$($payload.subscriptionName.serviceName)-$($payload.subscriptionName.environment)-$($payload.subscriptionName.instance)".ToLower()
-          $issueTitle = "[Subscription Vending] $subName"
+          $issueTitle = "[Subscripition Vending] $subName"
           
-          $disclaimer = @"
-          ⚠️ **Sandbox Usage Disclaimer**
-          - You are set as **Owner** and are **100% responsible** for any cost generated.
-          - 🧪 Sandbox environments **must not** talk to internal services. Any such requests will be declined.
-          - 🛠️ Cloud Platform is **not responsible** for anything in sandbox.
-          - 🧹 When you no longer need the subscription, please **delete it** or contact **Cloud Platform**.
-          "@
+          # Disclaimer (no here-string)
+          $disclaimer = @(
+          "⚠️ **Sandbox Usage Disclaimer**"
+          "- You are set as **Owner** and are **100% responsible** for any cost generated."
+          "- 🧪 Sandbox environments **must not** talk to internal services. Any such requests will be declined."
+          "- 🛠️ Cloud Platform is **not responsible** for anything in sandbox."
+          "- 🧹 When you no longer need the subscription, please **delete it** or contact **Cloud Platform**."
+          ) -join [Environment]::NewLine
           
           function Get-RequestedByTag([string]$email) {
             $local = $email.Split('@')[0]

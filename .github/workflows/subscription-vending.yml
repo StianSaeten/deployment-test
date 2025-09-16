@@ -1,4 +1,4 @@
-name: Subscription Vending (Webhook)
+name: Subscription Vending (Webhook + Manual)
 
 on:
   repository_dispatch:
@@ -27,9 +27,9 @@ permissions:
   issues: write
 
 env:
-  MANAGEMENT_GROUP_ID: parent-mg-id                         # <-- set your MG ID (or pass in payload)
+  MANAGEMENT_GROUP_ID: parent-mg-id
   TEMPLATE_FILE: deployments/self-service/subscriptions/deploy.bicep
-  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}       # <-- set in repo/org secrets (JSON for azure/login)
+  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
   LOCATION: westeurope
 
 jobs:
@@ -52,59 +52,59 @@ jobs:
             }
           }
 
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ env.AZURE_CREDENTIALS }}
+
       - name: Parse & validate input payload
         id: validate
         shell: pwsh
         run: |
-          # The webhook should send client_payload.json with needed fields.
-          # Example minimal payload structure is shown below.
-          $payload = @"
-          ${{ toJson(github.event.client_payload) }}
-          "@ | ConvertFrom-Json
-
-          if (-not $payload) {
-            Write-Error "No client_payload provided in repository_dispatch."
+          # Accept JSON from workflow_dispatch input OR repository_dispatch client_payload
+          $raw = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            @"
+            ${{ github.event.inputs.payload_json }}
+            "@
+                      } else {
+                        @"
+            ${{ toJson(github.event.client_payload) }}
+            "@
           }
 
-          # Expected payload fields:
-          # {
-          #   "subscriptionName": { "serviceName": "...", "environment": "sbx|dev|test|stage|prod", "instance": "001-010" },
-          #   "requestedBy": "firstname.lastname@montel.energy",
-          #   "managementGroupId": "parent-mg-id"  # optional; defaults to env
-          # }
-          $errors = @()
+          if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error "No input payload provided." }
 
+          try {
+            $payload = $raw | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            Write-Error "Invalid JSON. $_"
+          }
+
+          # Validate fields
+          $errors = @()
           if (-not $payload.subscriptionName) { $errors += "subscriptionName missing" }
           else {
             if (-not $payload.subscriptionName.serviceName) { $errors += "subscriptionName.serviceName missing" }
             if (-not $payload.subscriptionName.environment) { $errors += "subscriptionName.environment missing" }
-            if (-not $payload.subscriptionName.instance) { $errors += "subscriptionName.instance missing" }
-            # basic checks
+            if (-not $payload.subscriptionName.instance)    { $errors += "subscriptionName.instance missing" }
             $envOk = @('sbx','dev','test','stage','prod') -contains $payload.subscriptionName.environment
             if (-not $envOk) { $errors += "subscriptionName.environment must be one of sbx|dev|test|stage|prod" }
-            if ($payload.subscriptionName.instance -notmatch '^(00[1-9]|0[1-9]\d|10)$') {
-              # allow 001-010 (strict)
-              if ($payload.subscriptionName.instance -notmatch '^00[1-9]|0(0[1-9]|10)|10$') { $null = $errors += "subscriptionName.instance must be 001-010" }
-            }
+            # Only allow 001-010
+            if ($payload.subscriptionName.instance -notmatch '^(00[1-9]|010)$') { $errors += "subscriptionName.instance must be 001-010" }
             if ($payload.subscriptionName.serviceName -match '[^a-zA-Z0-9]') {
               Write-Host "Note: serviceName should not contain dashes or special chars; module will strip them."
             }
           }
-
           if (-not $payload.requestedBy) { $errors += "requestedBy missing" }
           elseif ($payload.requestedBy -notmatch '^[^@]+@[^@]+\.[^@]+$') { $errors += "requestedBy must be an email" }
 
-          if ($errors.Count -gt 0) {
-            Write-Error ("Validation failed: " + ($errors -join '; '))
-          }
+          if ($errors.Count -gt 0) { Write-Error ("Validation failed: " + ($errors -join '; ')) }
 
+          # Defaults/derived
           $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { "${{ env.MANAGEMENT_GROUP_ID }}" }
-
-          # Compose Title for the Issue
           $subName = "$($payload.subscriptionName.serviceName)-$($payload.subscriptionName.environment)-$($payload.subscriptionName.instance)".ToLower()
           $issueTitle = "[Subscripition Vending] $subName"
 
-          # build a disclaimer
           $disclaimer = @"
           ⚠️ **Sandbox Usage Disclaimer**
           - You are set as **Owner** and are **100% responsible** for any cost generated.
@@ -113,23 +113,21 @@ jobs:
           - 🧹 When you no longer need the subscription, please **delete it** or contact **Cloud Platform**.
           "@
 
-          # transform requestedBy to tag label: firstname.lastname@montel.energy -> firstname-lastname_f8u
           function Get-RequestedByTag([string]$email) {
             $local = $email.Split('@')[0]
-            $tag = ($local -replace '\.','-') + '_f8u'
-            return $tag
+            ($local -replace '\.','-') + '_f8u'
           }
           $tagLabel = Get-RequestedByTag $payload.requestedBy
 
-          # export step outputs
-          echo "issue_title=$issueTitle" >> $env:GITHUB_OUTPUT
-          echo "mg_id=$mgId" >> $env:GITHUB_OUTPUT
-          echo "requested_by=$($payload.requestedBy)" >> $env:GITHUB_OUTPUT
-          echo "requested_by_tag=$tagLabel" >> $env:GITHUB_OUTPUT
-          echo "subscription_compose_name=$subName" >> $env:GITHUB_OUTPUT
-          # stash full payload for later steps
-          $payload | ConvertTo-Json -Depth 10 | Out-File -FilePath payload.json -Encoding UTF8
-          $disclaimer | Out-File -FilePath disclaimer.md -Encoding UTF8
+          # Outputs for later steps
+          "issue_title=$issueTitle"                 | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "mg_id=$mgId"                             | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "requested_by=$($payload.requestedBy)"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "requested_by_tag=$tagLabel"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "subscription_compose_name=$subName"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          $payload    | ConvertTo-Json -Depth 20 | Set-Content payload.json -Encoding UTF8
+          $disclaimer | Set-Content disclaimer.md -Encoding UTF8
 
       - name: Create issue
         id: create_issue
@@ -139,7 +137,6 @@ jobs:
             const fs = require('fs');
             const payload = JSON.parse(fs.readFileSync('payload.json','utf8'));
             const disclaimer = fs.readFileSync('disclaimer.md','utf8');
-
             const subscriptionName = `${payload.subscriptionName.serviceName}-${payload.subscriptionName.environment}-${payload.subscriptionName.instance}`.toLowerCase();
 
             const body = [
@@ -201,13 +198,11 @@ jobs:
               body: lines.join('\n')
             });
 
-            // Add a status label
-            const addLabel = ok ? 'deployed' : 'failed';
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: num,
-              labels: [addLabel]
+              labels: [ ok ? 'deployed' : 'failed' ]
             });
 
       - name: Close issue if success
@@ -222,4 +217,3 @@ jobs:
               issue_number: num,
               state: 'closed'
             });
-

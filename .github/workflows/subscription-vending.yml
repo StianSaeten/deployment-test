@@ -34,12 +34,6 @@ jobs:
             }
           }
 
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: ${{ env.AZURE_CREDENTIALS }}
-          allow-no-subscriptions: true
-
       - name: Parse & validate input payload
         id: validate
         shell: pwsh
@@ -156,62 +150,6 @@ jobs:
               labels: ['subscription-vending', process.env.requested_by_tag]
             });
             core.setOutput('number', issue.data.number);
-
-      - name: Run deployment
-        id: deploy
-        shell: pwsh
-        continue-on-error: false
-        run: |
-          $payload = Get-Content payload.json -Raw | ConvertFrom-Json
-          $mgId   = "${{ steps.validate.outputs.mg_id }}"
-          $loc    = "${{ env.LOCATION }}"
-
-          $templatePath = (Join-Path $PWD "${{ env.TEMPLATE_FILE }}")
-          if (-not (Test-Path $templatePath)) {
-            Write-Error "Template file not found at $templatePath"
-          }
-
-          $ts = Get-Date -Format 'yyyyMMddHHmmss'
-          $name = "sub-$ts"
-
-          $paramObject = @{
-            parSubscriptionName = @{
-              serviceName = $payload.subscriptionName.serviceName
-              environment = $payload.subscriptionName.environment
-              instance    = $payload.subscriptionName.instance
-            }
-            parentManagementGroupId = $mgId
-            parRequestedBy          = $payload.requestedBy
-          }
-          if ($payload.parBillingScope) { $paramObject.parBillingScope = $payload.parBillingScope }
-          if ($payload.parCreatedOn)   { $paramObject.parCreatedOn   = $payload.parCreatedOn }
-
-          Write-Host "Starting New-AzManagementGroupDeployment..."
-          $deployment = New-AzManagementGroupDeployment `
-              -Name $name `
-              -Location $loc `
-              -ManagementGroupId $mgId `
-              -TemplateFile $templatePath `
-              -TemplateParameterObject $paramObject `
-              -ErrorAction Stop
-              -WhatIf
-
-          # Try to read expected outputs (adjust names to match your bicep outputs)
-          # e.g., output outSubscriptionId string, outSubscriptionResourceId string, outSubscriptionName string
-          $out = @{}
-          foreach ($k in @('outSubscriptionId','outSubscriptionResourceId','outSubscriptionName')) {
-            if ($deployment.Outputs.$k) { $out[$k] = $deployment.Outputs.$k.value }
-          }
-
-          # Fallback attempts (if outputs are named differently)
-          if (-not $out.ContainsKey('outSubscriptionName')) {
-            $out['outSubscriptionName'] = "${{ steps.validate.outputs.subscription_compose_name }}"
-          }
-
-          # Export as step outputs
-          foreach ($key in $out.Keys) {
-            echo ("{0}={1}" -f $key, $out[$key]) >> $env:GITHUB_OUTPUT
-          }
 
       - name: Update issue with results
         if: always()

@@ -18,7 +18,6 @@ on:
             },
             "requestedBy": "firstname.lastname@montel.energy",
             "managementGroupId": "parent-mg-id",
-            "parBillingScope": "/providers/Microsoft.Billing/...optional...",
             "parCreatedOn": "2025-09-16"
           }
 
@@ -27,7 +26,6 @@ permissions:
   issues: write
 
 env:
-  MANAGEMENT_GROUP_ID: parent-mg-id
   TEMPLATE_FILE: deployments/self-service/subscriptions/deploy.bicep
   AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
   LOCATION: westeurope
@@ -91,14 +89,14 @@ jobs:
           if ($errors.Count -gt 0) { Write-Error ("Validation failed: " + ($errors -join '; ')) }
           
           # Defaults/derived
-          $mgId = if ($payload.managementGroupId) { $payload.managementGroupId } else { "${{ env.MANAGEMENT_GROUP_ID }}" }
+          $mgId = "$payload.managementGroupId"
           $subName = "$($payload.subscriptionName.serviceName)-$($payload.subscriptionName.environment)-$($payload.subscriptionName.instance)".ToLower()
           $issueTitle = "[Subscripition Vending] $subName"
           
           # Disclaimer (no here-string)
           $disclaimer = @(
           "⚠️ **Sandbox Usage Disclaimer**"
-          "- You are set as **Owner** and are **100% responsible** for any cost generated."
+          "- The requestor will be set as **Owner** and are **100% responsible** for any cost generated."
           "- 🧪 Sandbox environments **must not** talk to internal services. Any such requests will be declined."
           "- 🛠️ Cloud Platform is **not responsible** for anything in sandbox."
           "- 🧹 When you no longer need the subscription, please **delete it** or contact **Cloud Platform**."
@@ -118,7 +116,9 @@ jobs:
           "subscription_compose_name=$subName"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           
           $payload    | ConvertTo-Json -Depth 20 | Set-Content payload.json -Encoding UTF8
-          $disclaimer | Set-Content disclaimer.md -Encoding UTF8
+          if ($subName -like '*-sbx-*')  {
+            $disclaimer | Set-Content disclaimer.md -Encoding UTF8
+          }
 
       - name: Create issue
         id: create_issue
@@ -142,9 +142,6 @@ jobs:
               '```json',
               JSON.stringify(payload, null, 2),
               '```',
-              ``,
-              `### ℹ️ Notes`,
-              `- Deployment starting shortly…`,
               ``,
               `---`,
               disclaimer

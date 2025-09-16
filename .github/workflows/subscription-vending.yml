@@ -3,6 +3,24 @@ name: Subscription Vending (Webhook)
 on:
   repository_dispatch:
     types: [subscription_vending_request]
+  workflow_dispatch:
+    inputs:
+      payload_json:
+        description: 'Paste JSON payload here'
+        required: true
+        type: string
+        default: |
+          {
+            "subscriptionName": {
+              "serviceName": "myservice",
+              "environment": "dev",
+              "instance": "001"
+            },
+            "requestedBy": "firstname.lastname@montel.energy",
+            "managementGroupId": "parent-mg-id",
+            "parBillingScope": "/providers/Microsoft.Billing/...optional...",
+            "parCreatedOn": "2025-09-16"
+          }
 
 permissions:
   contents: read
